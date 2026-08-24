@@ -1,7 +1,7 @@
 {
-  "url": "https://your-domain.example.com",
+  "url": "https://TonnConnect.onrender.com",
   "name": "My TON Connect Bot",
-  "iconUrl": "https://your-domain.example.com/icon.png",
+  "iconUrl": "https://TonnConnect.onrender.com/icon.png",
   "termsOfUseUrl": "https://your-domain.example.com/terms",
   "privacyPolicyUrl": "https://your-domain.example.com/privacy"
 }
