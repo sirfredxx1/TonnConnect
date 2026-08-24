@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Connect Wallet</title>
+
+<!-- Telegram Mini Apps JS bridge — gives us Telegram.WebApp -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<!-- TonConnect UI — this is what draws the exact "Connect your TON wallet" sheet
+     from the reference screenshot. We do NOT restyle it, so it renders stock. -->
+<script src="https://unpkg.com/@tonconnect/ui@2.0.5/dist/tonconnect-ui.min.js"></script>
+
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #131318;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    text-align: center;
+    color: #ffffff;
+  }
+  .status { font-size: 14px; opacity: 0.65; max-width: 300px; }
+  .status.err { color: #E88; opacity: 1; }
+  .addr {
+    font-family: monospace;
+    font-size: 13px;
+    background: rgba(255,255,255,0.08);
+    padding: 10px 14px;
+    border-radius: 10px;
+    word-break: break-all;
+    max-width: 320px;
+  }
+  /* Fallback button, only shown if the modal fails to auto-open
+     (e.g. a browser blocked the programmatic call). Styled to match
+     TonConnect's own default connect button. */
+  #fallback-btn {
+    display: none;
+    padding: 14px 22px;
+    border: none;
+    border-radius: 14px;
+    background: #007AFF;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="pre-status" class="status">Loading wallet connect…</div>
+    <button id="fallback-btn" type="button">Connect Wallet</button>
+    <div id="post" hidden>
+      <h2 style="margin:0 0 12px;">✅ Wallet connected</h2>
+      <div class="addr" id="addr-display"></div>
+      <div class="status" id="post-status" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+<script>
+(async () => {
+  const tg = window.Telegram?.WebApp;
+  tg?.ready();
+  tg?.expand();
+
+  const preStatus = document.getElementById('pre-status');
+  const fallbackBtn = document.getElementById('fallback-btn');
+  const post = document.getElementById('post');
+  const addrDisplay = document.getElementById('addr-display');
+  const postStatus = document.getElementById('post-status');
+
+  let cfg;
+  try {
+    cfg = await fetch('/config.json').then(r => r.json());
+  } catch {
+    cfg = {};
+  }
+
+  if (!cfg.manifestUrl) {
+    preStatus.textContent = 'Setup needed: TONCONNECT_MANIFEST_URL is not set on the server.';
+    preStatus.classList.add('err');
+    return;
+  }
+
+  // No uiPreferences override here on purpose — leaving this out gives you
+  // TonConnect's own default dark theme, which is what produced the
+  // reference screenshot. If you ever want to re-brand it, that's done via
+  // uiPreferences.colorsSet, but the ask here was to keep it stock.
+  const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+    manifestUrl: cfg.manifestUrl,
+  });
+
+  async function persist(address) {
+    postStatus.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/save-wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData: tg?.initData || '', address }),
+      });
+      if (!res.ok) throw new Error('save failed');
+      postStatus.textContent = 'Saved — returning to chat…';
+      setTimeout(() => tg?.close(), 1200);
+    } catch (err) {
+      postStatus.textContent = 'Connected, but we could not save this to your account. Please try again.';
+      postStatus.classList.add('err');
+      console.error(err);
+    }
+  }
+
+  tonConnectUI.onStatusChange((wallet) => {
+    if (!wallet) return;
+    const address = wallet.account.address;
+    preStatus.hidden = true;
+    fallbackBtn.style.display = 'none';
+    post.hidden = false;
+    addrDisplay.textContent = address;
+    persist(address);
+  });
+
+  // Auto-open the connect sheet as soon as the page loads, same as tapping
+  // "Connect Wallet" in the screenshot — no extra tap needed inside the mini app.
+  try {
+    await tonConnectUI.openModal();
+    preStatus.textContent = 'Choose a wallet to link it to your account.';
+  } catch (err) {
+    // Some browsers block a modal fired without a direct user gesture.
+    // Show a plain fallback button so the user can trigger it manually.
+    preStatus.textContent = 'Tap below to connect your wallet.';
+    fallbackBtn.style.display = 'inline-block';
+    fallbackBtn.addEventListener('click', () => tonConnectUI.openModal());
+  }
+})();
+</script>
+</body>
+</html>
