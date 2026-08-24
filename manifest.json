@@ -1,7 +1,5 @@
 {
   "url": "https://tonnconnect.onrender.com",
   "name": "My TON Connect App",
-  "iconUrl": "https://tonnconnect.onrender.com/icon.png",
-  "termsOfUseUrl": "https://tonnconnect.onrender.com/terms",
-  "privacyPolicyUrl": "https://tonnconnect.onrender.com/privacy"
+  "iconUrl": "https://ton.org/download/ton_symbol.png"
 }
