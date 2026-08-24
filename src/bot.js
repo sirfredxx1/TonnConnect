@@ -25,7 +25,14 @@ bot.callbackQuery(/^lang:(en|ru)$/, async (ctx) => {
   const language = ctx.match[1];
   upsertUserLanguage(ctx.from.id, language);
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(t(language).languageSet);
+  try {
+    await ctx.editMessageText(t(language).languageSet);
+  } catch (err) {
+    // Harmless: happens if the user taps the same language button twice in a
+    // row, since the message content would be identical. Anything else should
+    // still surface via bot.catch below.
+    if (!err.description?.includes('message is not modified')) throw err;
+  }
   await sendConnectPage(ctx, ctx.from.id, language);
 });
 
@@ -130,3 +137,12 @@ bot.command('invoice', async (ctx) => {
 });
 
 export default bot;
+
+// CRITICAL: without this, ANY unexpected error from a Telegram API call
+// (rate limits, a user blocking the bot, a stale message, etc.) throws
+// uncaught and kills the entire Node process — taking your web server and
+// payment endpoints down with it, then Render restarts you into a
+// crash-loop. This ensures a single bad update is just logged, not fatal.
+bot.catch((err) => {
+  console.error('Bot error (update did not crash the process):', err.message);
+});
