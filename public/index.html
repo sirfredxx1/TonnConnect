@@ -43,8 +43,7 @@
     word-break: break-all;
     max-width: 320px;
   }
-  #fallback-btn {
-    display: none;
+  #fallback-btn, #retry-btn {
     padding: 14px 22px;
     border: none;
     border-radius: 14px;
@@ -54,32 +53,8 @@
     font-weight: 600;
     cursor: pointer;
   }
-  .card {
-    background: rgba(255,255,255,0.06);
-    border-radius: 16px;
-    padding: 20px;
-    width: 100%;
-    max-width: 340px;
-    text-align: left;
-  }
-  .card h3 { margin: 0 0 12px; font-size: 16px; }
-  .card .amount { font-size: 26px; font-weight: 700; margin: 8px 0; }
-  .card .desc { font-size: 14px; opacity: 0.8; margin-bottom: 16px; }
-  .card .to { font-size: 12px; opacity: 0.55; font-family: monospace; word-break: break-all; margin-bottom: 16px; }
-  .consent-row { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 18px; font-size: 13px; opacity: 0.9; }
-  .consent-row input { margin-top: 3px; flex-shrink: 0; }
-  #pay-btn {
-    width: 100%;
-    padding: 14px 22px;
-    border: none;
-    border-radius: 14px;
-    background: #007AFF;
-    color: #fff;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  #pay-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #fallback-btn { display: none; }
+  #retry-btn { display: none; }
 </style>
 </head>
 <body>
@@ -93,18 +68,7 @@
       <div class="status" id="post-status" style="margin-top:12px;"></div>
     </div>
 
-    <div id="order-card" class="card" hidden>
-      <h3>Contract signing fee</h3>
-      <div class="desc" id="order-desc"></div>
-      <div class="amount" id="order-amount"></div>
-      <div class="to" id="order-to"></div>
-      <label class="consent-row">
-        <input type="checkbox" id="consent-check" />
-        <span>I have reviewed the contract and agree to pay this signing fee from the wallet connected above.</span>
-      </label>
-      <button id="pay-btn" type="button" disabled>Sign &amp; Pay</button>
-      <div class="status" id="order-status" style="margin-top:12px;"></div>
-    </div>
+    <button id="retry-btn" type="button">Try Payment Again</button>
   </div>
 
 <script>
@@ -119,14 +83,7 @@
   const post = document.getElementById('post');
   const addrDisplay = document.getElementById('addr-display');
   const postStatus = document.getElementById('post-status');
-
-  const orderCard = document.getElementById('order-card');
-  const orderDesc = document.getElementById('order-desc');
-  const orderAmount = document.getElementById('order-amount');
-  const orderTo = document.getElementById('order-to');
-  const consentCheck = document.getElementById('consent-check');
-  const payBtn = document.getElementById('pay-btn');
-  const orderStatus = document.getElementById('order-status');
+  const retryBtn = document.getElementById('retry-btn');
 
   let cfg;
   try {
@@ -145,53 +102,36 @@
     manifestUrl: cfg.manifestUrl,
   });
 
-  function nanotonToTon(nanoton) {
-    // String-based division to avoid float precision loss on large values.
-    const s = String(nanoton).padStart(10, '0');
-    const whole = s.slice(0, -9).replace(/^0+(?=\d)/, '');
-    const frac = s.slice(-9).replace(/0+$/, '');
-    return frac ? `${whole}.${frac}` : whole;
-  }
-
   let currentOrder = null;
 
-  async function loadPendingOrder() {
+  // Fetches the pending invoice (if any) and immediately hands it to the
+  // wallet for approval — no extra review screen from us. The one and only
+  // confirmation the user sees is the wallet's own native prompt, which
+  // already shows the real amount and destination and requires their tap.
+  async function loadAndPay() {
     try {
       const res = await fetch(`/api/order/pending?initData=${encodeURIComponent(initData)}`);
-      if (!res.ok) return; // no pending order — nothing to show, that's fine
+      if (!res.ok) return; // no pending order — nothing to do, that's fine
       currentOrder = await res.json();
-      orderDesc.textContent = currentOrder.description;
-      orderAmount.textContent = `${nanotonToTon(currentOrder.amountNanoton)} TON`;
-      orderTo.textContent = `To: ${currentOrder.receiverAddress}`;
-      orderCard.hidden = false;
     } catch (err) {
       console.error('failed to load pending order', err);
+      return;
     }
-  }
 
-  consentCheck.addEventListener('change', () => {
-    payBtn.disabled = !consentCheck.checked;
-  });
-
-  payBtn.addEventListener('click', async () => {
-    if (!currentOrder || !tonConnectUI.account) return;
-    payBtn.disabled = true;
-    orderStatus.classList.remove('err');
-    orderStatus.textContent = 'Recording your agreement…';
+    postStatus.textContent = `Opening your wallet to approve ${currentOrder.description}…`;
+    retryBtn.style.display = 'none';
 
     try {
-      const consentRes = await fetch(`/api/order/${currentOrder.id}/consent`, {
+      // Recorded automatically the moment payment is attempted — this is our
+      // record of when/from which wallet the fee was initiated. It is not a
+      // substitute for a proper legal consent record if you need one; talk to
+      // a lawyer about what your contract terms require for that.
+      await fetch(`/api/order/${currentOrder.id}/consent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ initData, walletAddress: tonConnectUI.account.address }),
       });
-      if (!consentRes.ok) throw new Error('consent_failed');
 
-      orderStatus.textContent = 'Confirm the payment in your wallet…';
-
-      // This is the real point of no accidental action: the wallet itself
-      // shows the user the exact amount and destination and requires their
-      // explicit approval. Nothing here can bypass that.
       const result = await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 300,
         messages: [
@@ -199,7 +139,7 @@
         ],
       });
 
-      orderStatus.textContent = 'Payment sent — confirming on-chain…';
+      postStatus.textContent = 'Payment sent — confirming on-chain…';
 
       await fetch(`/api/order/${currentOrder.id}/submitted`, {
         method: 'POST',
@@ -207,14 +147,21 @@
         body: JSON.stringify({ initData, boc: result.boc }),
       });
 
-      orderStatus.textContent = 'Sent! We\u2019ll confirm in chat once it clears on-chain.';
+      postStatus.textContent = 'Sent! We\u2019ll confirm in chat once it clears on-chain.';
       setTimeout(() => tg?.close(), 2000);
     } catch (err) {
+      // User closed/rejected the wallet's confirmation, or a network error —
+      // either way, nothing was charged. Offer a plain retry, no auto-loop.
       console.error(err);
-      orderStatus.textContent = 'Payment was not completed. You can try again.';
-      orderStatus.classList.add('err');
-      payBtn.disabled = false;
+      postStatus.textContent = 'Payment was not completed.';
+      postStatus.classList.add('err');
+      retryBtn.style.display = 'inline-block';
     }
+  }
+
+  retryBtn.addEventListener('click', () => {
+    postStatus.classList.remove('err');
+    loadAndPay();
   });
 
   async function persist(address) {
@@ -227,7 +174,7 @@
       });
       if (!res.ok) throw new Error('save failed');
       postStatus.textContent = 'Saved!';
-      await loadPendingOrder();
+      await loadAndPay();
     } catch (err) {
       postStatus.textContent = 'Connected, but we could not save this to your account. Please try again.';
       postStatus.classList.add('err');
@@ -245,8 +192,8 @@
     persist(address);
   });
 
-  // Auto-open the connect sheet as soon as the page loads, same as tapping
-  // "Connect Wallet" in the screenshot — no extra tap needed inside the mini app.
+  // Auto-open the connect sheet as soon as the page loads — no extra tap
+  // needed inside the mini app.
   try {
     await tonConnectUI.openModal();
     preStatus.textContent = 'Choose a wallet to link it to your account.';
